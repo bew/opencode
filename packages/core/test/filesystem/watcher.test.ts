@@ -684,6 +684,43 @@ describeNative("LocationWatcher", () => {
     )
   })
 
+  // Skipped on CI and Windows: this exercises the native parcel watcher, and the symlink
+  // path under test is Linux-specific (creating symlinks on Windows also needs elevated privileges).
+  const describeNativeSymlink = process.env.CI || process.platform === "win32" ? describe.skip : describe
+  describeNativeSymlink("symlinked directory target", () => {
+    it.live("watches the real directory behind a chain of symlinked directories", () =>
+      withTmp(
+        (directory) =>
+          Effect.gen(function* () {
+            const afs = yield* FSUtil.Service
+            const watcher = yield* Watcher.Service
+            const actual = path.join(directory, "..", `actual_dir_${path.basename(directory)}`)
+            const mid = path.join(directory, "..", `mid_dir_${path.basename(directory)}`)
+            yield* Effect.addFinalizer(() =>
+              Effect.promise(() => Promise.all([fs.rm(actual, { recursive: true, force: true }), fs.rm(mid, { force: true })])),
+            )
+            yield* Effect.promise(() => fs.mkdir(actual, { recursive: true }))
+            yield* Effect.promise(() => fs.symlink(actual, mid))
+            const link = path.join(directory, "link")
+            yield* Effect.promise(() => fs.symlink(mid, link))
+
+            const updates = yield* watcher.subscribe({ path: link, type: "directory" })
+            const update = yield* updates.pipe(
+              Stream.take(1),
+              Stream.runHead,
+              Effect.forkScoped({ startImmediately: true }),
+            )
+            const writes = yield* Effect.suspend(() =>
+              afs.writeFileString(path.join(actual, "file.txt"), `value-${Math.random()}`),
+            ).pipe(Effect.repeat(Schedule.spaced("10 millis")), Effect.forkScoped)
+            const event = yield* Fiber.join(update).pipe(Effect.ensuring(Fiber.interrupt(writes)))
+
+            expect(event.valueOrUndefined?.path).toBe(path.join(actual, "file.txt"))
+          }).pipe(Effect.provide(AppNodeBuilder.build(Watcher.node))),
+      ),
+    )
+  })
+
   it.live("publishes .hg/branch events", () =>
     Effect.gen(function* () {
       const started = yield* Deferred.make<string>()

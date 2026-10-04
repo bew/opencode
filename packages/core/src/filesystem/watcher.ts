@@ -8,7 +8,7 @@ import { FSUtil } from "@opencode/util/fs-util"
 import { isRecord } from "@opencode/util/record"
 import { Cause, Context, Effect, Layer, PubSub, RcMap, Stream } from "effect"
 import { lazy } from "../util/lazy.js"
-import { watch } from "node:fs"
+import { realpathSync, watch } from "node:fs"
 import path from "path"
 import loadBinding from "./watcher-binding.js"
 
@@ -125,7 +125,18 @@ export const layer = (options?: Options) =>
       })
 
       const subscribe = Effect.fnUntraced(function* (input: WatchInput, onReady: Effect.Effect<void> = Effect.void) {
-        const target = path.resolve(input.path)
+        const resolved = path.resolve(input.path)
+        // Parcel's inotify backend subscribes with IN_DONT_FOLLOW | IN_ONLYDIR, so a symlinked directory
+        // target (e.g. a symlinked global config dir) fails with ENOTDIR and no events arrive.
+        // Watch the resolved real directory instead, falling back to the unresolved path when it does
+        // not exist yet.
+        // file/entries targets use node fs.watch, which already follows symlinks.
+        const target =
+          input.type === "directory"
+            ? yield* Effect.try({ try: () => realpathSync(resolved), catch: () => resolved }).pipe(
+                Effect.orElseSucceed(() => resolved),
+              )
+            : resolved
         const ignore = [...new Set(input.type === "directory" ? (input.ignore ?? []) : [])].toSorted()
         const names = [...new Set(input.type === "entries" ? input.names : [])].toSorted()
         yield* Effect.logInfo("watcher subscribe", {
