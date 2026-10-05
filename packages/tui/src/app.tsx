@@ -80,6 +80,7 @@ import { PromptHistoryProvider } from "./prompt/history"
 import { FrecencyProvider } from "./prompt/frecency"
 import { PromptStashProvider } from "./prompt/stash"
 import { Toast, ToastProvider, useToast } from "./ui/toast"
+import { LoadReloadToast } from "./component/load-reload-toast"
 import { isFallbackTitle } from "@opencode/util/session-title-fallback"
 import * as Model from "./util/model"
 import { ArgsProvider, useArgs, type Args } from "./context/args"
@@ -1399,6 +1400,7 @@ function App() {
         <Reconnecting managed={client.restart !== undefined} />
       </Show>
       <MigrationOverlay />
+      <LoadReloadToast />
       <Toast />
     </box>
   )

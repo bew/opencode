@@ -332,6 +332,27 @@ export function resolve(
   }
 }
 
+// Callback invoked when the CLI config is reloaded.
+export type ConfigReloadHandler = () => void
+
+// Subscriber currently receiving CLI config reloads, if any.
+let configReloadHandler: ConfigReloadHandler | undefined
+
+// Process-global emitter for CLI config reloads, consumed by the reload toast.
+export const configReloads = {
+  // Notifies the installed subscriber, if any.
+  emit() {
+    configReloadHandler?.()
+  },
+  // Installs the subscriber and returns a disposer.
+  onReload(next: ConfigReloadHandler) {
+    configReloadHandler = next
+    return () => {
+      if (configReloadHandler === next) configReloadHandler = undefined
+    }
+  },
+}
+
 const ConfigContext = createContext<{
   data: Resolved
   path?: string
@@ -354,11 +375,21 @@ export function ConfigProvider(props: {
     return info
   }
   let reload = Promise.resolve()
-  const watcher = host?.path
-    ? watch(path.dirname(host.path), () => {
+  const hostPath = host?.path
+  const watcher = hostPath
+    ? watch(path.dirname(hostPath), (_event, filename) => {
+        const changed = filename?.toString()
+        const name = path.basename(hostPath)
+        // The watcher covers the whole config directory, but this provider owns
+        // only the CLI config file; other files (the server config, agents,
+        // skills, ...) are reported by their own sources.
+        if (changed !== undefined && changed !== name && !changed.startsWith(name + ".")) return
         reload = reload
           .then(() => host.get())
-          .then(apply)
+          .then((info) => {
+            apply(info)
+            configReloads.emit()
+          })
           .catch(() => {})
       })
     : undefined
